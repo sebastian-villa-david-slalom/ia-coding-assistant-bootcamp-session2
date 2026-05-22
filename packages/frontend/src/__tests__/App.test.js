@@ -5,44 +5,84 @@ import { rest } from 'msw';
 import { setupServer } from 'msw/node';
 import App from '../App';
 
-// Mock server to intercept API requests
+window.confirm = jest.fn(() => true);
+
 const server = setupServer(
-  // GET /api/items handler
-  rest.get('/api/items', (req, res, ctx) => {
+  rest.get('/api/todos', (req, res, ctx) => {
     return res(
       ctx.status(200),
       ctx.json([
-        { id: 1, name: 'Test Item 1', created_at: '2023-01-01T00:00:00.000Z' },
-        { id: 2, name: 'Test Item 2', created_at: '2023-01-02T00:00:00.000Z' },
+        {
+          id: 1,
+          title: 'Pay utilities',
+          description: 'Electricity and internet bills',
+          dueDate: '2026-06-15',
+          completed: false,
+          createdAt: '2026-05-20T10:00:00.000Z',
+          updatedAt: '2026-05-20T10:00:00.000Z',
+        },
+        {
+          id: 2,
+          title: 'Schedule dentist',
+          description: '',
+          dueDate: null,
+          completed: true,
+          createdAt: '2026-05-19T10:00:00.000Z',
+          updatedAt: '2026-05-19T10:00:00.000Z',
+        },
       ])
     );
   }),
-  
-  // POST /api/items handler
-  rest.post('/api/items', (req, res, ctx) => {
-    const { name } = req.body;
-    
-    if (!name || name.trim() === '') {
-      return res(
-        ctx.status(400),
-        ctx.json({ error: 'Item name is required' })
-      );
+
+  rest.post('/api/todos', (req, res, ctx) => {
+    const { title, description, dueDate } = req.body;
+
+    if (!title || title.trim() === '') {
+      return res(ctx.status(400), ctx.json({ error: 'Task title is required' }));
     }
-    
+
     return res(
       ctx.status(201),
       ctx.json({
         id: 3,
-        name,
-        created_at: new Date().toISOString(),
+        title,
+        description: description || null,
+        dueDate: dueDate || null,
+        completed: false,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
       })
     );
+  }),
+
+  rest.patch('/api/todos/:id/status', (req, res, ctx) => {
+    const { id } = req.params;
+    const { completed } = req.body;
+
+    return res(
+      ctx.status(200),
+      ctx.json({
+        id: Number(id),
+        title: 'Pay utilities',
+        description: 'Electricity and internet bills',
+        dueDate: '2026-06-15',
+        completed,
+        createdAt: '2026-05-20T10:00:00.000Z',
+        updatedAt: new Date().toISOString(),
+      })
+    );
+  }),
+
+  rest.delete('/api/todos/:id', (req, res, ctx) => {
+    return res(ctx.status(200), ctx.json({ message: 'Task deleted successfully', id: Number(req.params.id) }));
   })
 );
 
-// Setup and teardown for the mock server
 beforeAll(() => server.listen());
-afterEach(() => server.resetHandlers());
+afterEach(() => {
+  server.resetHandlers();
+  window.confirm.mockReturnValue(true);
+});
 afterAll(() => server.close());
 
 describe('App Component', () => {
@@ -50,87 +90,119 @@ describe('App Component', () => {
     await act(async () => {
       render(<App />);
     });
-    expect(screen.getByText('React Frontend with Node Backend')).toBeInTheDocument();
-    expect(screen.getByText('Connected to in-memory database')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Task planner' })).toBeInTheDocument();
+    expect(screen.getByText(/Track tasks, due dates, and completion state/i)).toBeInTheDocument();
   });
 
-  test('loads and displays items', async () => {
+  test('loads and displays tasks', async () => {
     await act(async () => {
       render(<App />);
     });
-    
-    // Initially shows loading state
-    expect(screen.getByText('Loading data...')).toBeInTheDocument();
-    
-    // Wait for items to load
+
+    expect(screen.getByText('Loading tasks...')).toBeInTheDocument();
+
     await waitFor(() => {
-      expect(screen.getByText('Test Item 1')).toBeInTheDocument();
-      expect(screen.getByText('Test Item 2')).toBeInTheDocument();
+      expect(screen.getByText('Pay utilities')).toBeInTheDocument();
+      expect(screen.getByText('Schedule dentist')).toBeInTheDocument();
     });
   });
 
-  test('adds a new item', async () => {
+  test('adds a new task', async () => {
     const user = userEvent.setup();
-    
+
     await act(async () => {
       render(<App />);
     });
-    
-    // Wait for items to load
+
     await waitFor(() => {
-      expect(screen.queryByText('Loading data...')).not.toBeInTheDocument();
+      expect(screen.queryByText('Loading tasks...')).not.toBeInTheDocument();
     });
-    
-    // Fill in the form and submit
-    const input = screen.getByPlaceholderText('Enter item name');
+
+    const input = screen.getByRole('textbox', { name: /task title/i });
     await act(async () => {
-      await user.type(input, 'New Test Item');
+      await user.type(input, 'Prepare roadmap draft');
     });
-    
-    const submitButton = screen.getByText('Add Item');
+
+    const submitButton = screen.getByRole('button', { name: 'Add task' });
     await act(async () => {
       await user.click(submitButton);
     });
-    
-    // Check that the new item appears
+
     await waitFor(() => {
-      expect(screen.getByText('New Test Item')).toBeInTheDocument();
+      expect(screen.getByText('Prepare roadmap draft')).toBeInTheDocument();
     });
   });
 
   test('handles API error', async () => {
-    // Override the default handler to simulate an error
     server.use(
-      rest.get('/api/items', (req, res, ctx) => {
+      rest.get('/api/todos', (req, res, ctx) => {
         return res(ctx.status(500));
       })
     );
-    
+
     await act(async () => {
       render(<App />);
     });
-    
-    // Wait for error message
+
     await waitFor(() => {
-      expect(screen.getByText(/Failed to fetch data/)).toBeInTheDocument();
+      expect(screen.getByText(/Unable to load tasks right now/)).toBeInTheDocument();
     });
   });
 
-  test('shows empty state when no items', async () => {
-    // Override the default handler to return empty array
+  test('shows empty state when no tasks', async () => {
     server.use(
-      rest.get('/api/items', (req, res, ctx) => {
+      rest.get('/api/todos', (req, res, ctx) => {
         return res(ctx.status(200), ctx.json([]));
       })
     );
-    
+
     await act(async () => {
       render(<App />);
     });
-    
-    // Wait for empty state message
+
     await waitFor(() => {
-      expect(screen.getByText('No items found. Add some!')).toBeInTheDocument();
+      expect(screen.getByText('No tasks to show')).toBeInTheDocument();
+    });
+  });
+
+  test('filters tasks by status', async () => {
+    const user = userEvent.setup();
+
+    await act(async () => {
+      render(<App />);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('Pay utilities')).toBeInTheDocument();
+    });
+
+    await act(async () => {
+      await user.click(screen.getByRole('button', { name: 'Completed' }));
+    });
+
+    expect(screen.getByText('Schedule dentist')).toBeInTheDocument();
+    expect(screen.queryByText('Pay utilities')).not.toBeInTheDocument();
+  });
+
+  test('deletes a task', async () => {
+    const user = userEvent.setup();
+
+    await act(async () => {
+      render(<App />);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('Pay utilities')).toBeInTheDocument();
+    });
+
+    const deleteButton = screen.getByRole('button', { name: 'delete Pay utilities' });
+
+    await act(async () => {
+      await user.click(deleteButton);
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByText('Pay utilities')).not.toBeInTheDocument();
     });
   });
 });
